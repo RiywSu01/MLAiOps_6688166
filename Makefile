@@ -41,6 +41,7 @@ image-push: image ## Push to CONTAINER_REGISTRY via your adapter
 	print(get_adapter(config.load()).push_image(\"$(IMAGE):$(TAG)\"))"
 
 reproduce: data image ## THE ONE COMMAND. Grader runs this.
+	@mkdir -p reports && chmod 777 reports
 	docker run --rm \
 	  -v "$$PWD/data:/app/data:ro" \
 	  -v "$$PWD/reports:/app/reports" \

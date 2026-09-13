@@ -21,16 +21,10 @@ whether a stranger can reproduce it is.
 make reproduce
 ```
 
-expected test_roc_auc: 0.848 ± 0.010
+expected test_roc_auc: 0.8482 ± 0.0060
 
-Runtime: about 40 seconds on 4 cores. No cloud account or credentials needed for this command —
+Runtime: about 15 seconds on 14 cores and 20 threads. No cloud account or credentials needed for this command —
 that is deliberate, and it is why a grader can run it.
-
-**REPLACE:** re-measure and update that claim line after your final change. Keep the exact
-format `expected test_roc_auc: <value> ± <tolerance>`; `make verify` parses it, and so does the
-grading script. Choose the tolerance from the spread you actually observe across seeds. Padding it
-to hide non-determinism is visible — the grader compares your tolerance against the variance in
-your own tracked runs.
 
 ---
 
@@ -105,22 +99,13 @@ different seeds.
 
 ## Reproducibility trade-off
 
-**REPLACE with your answer, 100 words maximum.**
-
-Three things pin your build: hashed dependencies, a digest-pinned base image, and controlled
-seeds. Under real time pressure you would keep some and drop others.
-
-Which would you drop first, and what specifically breaks when you do? There is a defensible
-answer, and we compare answers in Session 2. An answer that refuses to choose scores zero.
+Personally, i would drop controlled seeds first. because the seeds effect or break on the ML randomness generator algorithm to produce the exact same sequence of random numbers every single time only, which is better than dropped the hashed dependencies that pin on the download package version and digest-pinned base image that pin on the exact version of the OS.
 
 ---
 
 ## Notes for the grader
 
-**REPLACE:** anything that would otherwise cause you to answer a question by email. Non-obvious
-choices, known limitations, anything that behaves differently on your machine. A README that
-requires a conversation has failed the lab regardless of what the code does.
-
+- I have change the region on cloud from Southeast Asia to East Asia, because the policy of Azure for students maybe restrict that region.
 ---
 
 ## Checklist before you submit
