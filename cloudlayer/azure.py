@@ -31,26 +31,28 @@ from azure.storage.blob import BlobServiceClient
 
 class AzureAdapter(CloudAdapter):
     #Parse blob-uri function
+    @staticmethod
     def _parse_blob_uri(blob_uri: str) -> tuple[str, str, str]:
         parsed = urlparse(blob_uri)
 
         account_url = f"{parsed.scheme}://{parsed.netloc}"
 
-        parts = parsed.path.strip("/").split("/", 1)
-
-        if not parts:
+        path = parsed.path.strip("/")
+        if not path:
             raise ValueError(f"Invalid BLOB_URI: {blob_uri}")
+
+        parts = path.split("/", 1)
 
         container = parts[0]
         #Check that second element exist or not on prefix
         prefix = parts[1] if len(parts) > 1 else ""
 
-        return account_url, container, prefix;
+        return account_url, container, prefix
 
     def upload(self, local_path: str, key: str) -> str:
         #Get the url, container, prefix from _parse_blob_uri function
         #use "self.cfg" because the base.py already declared
-        account_url, container, prefix = _parse_blob_uri(self.cfg.blob_uri)
+        account_url, container, prefix = self._parse_blob_uri(self.cfg.blob_uri)
 
         #Azure figure out how this app should authenticate by itself, because we dont want to used connection string due to it can leaks the crucial information.
         credential = DefaultAzureCredential()
@@ -80,7 +82,7 @@ class AzureAdapter(CloudAdapter):
 
 
     def download(self, uri: str, local_path: str) -> None:
-        account_url, container, blob_name = _parse_blob_url(uri)
+        account_url, container, blob_name = self._parse_blob_uri(uri)
 
         credential = DefaultAzureCredential()
 
@@ -152,9 +154,12 @@ class AzureAdapter(CloudAdapter):
         )
 
         #Make it output in this format ("registry.azurecr.io/repo@sha256:...")
-        digests = [d.strip() for d in result.stdout.strip().splitlines() if registry_name in d]
-        digest_reference = digests[0] if digests else result.stdout.strip().splitlines()[0]
-        return digest_reference
+        digests = [d.strip() for d in result.stdout.strip().splitlines() if d.startswith(registry + "@")]
+        if not digests:
+            raise RuntimeError(
+                f"Could not find digest for {remote_tag}"
+            )
+        return digests[0]
 
     # submit_training / register_model  -> Lab 2 (Azure ML command job + model registry)
     # deploy / invoke                   -> Lab 3 (managed online endpoint + deployment)
