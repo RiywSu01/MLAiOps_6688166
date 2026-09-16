@@ -68,6 +68,15 @@ compare: ## Rank runs by metric and by cost per point
 reload-check: ## Load the registered model by version and score rows
 	python scripts/reload_check.py --name $(MODEL_REGISTRY_NAME) --version $(VERSION)
 
+#Created on Lab02 Task01
+train-remote: ## Submit training to Azure ML and wait for completion
+	python -c "from src import config; from cloudlayer.factory import get_adapter; \
+	cfg = config.load(); adapter = get_adapter(cfg); \
+	job_id = adapter.submit_training(f'{cfg.container_registry}:$(TAG)', {'seed': $(SEED)}); \
+	print(f'Submitted training job: {job_id}'); \
+	res = adapter.wait_training(job_id); \
+	print(f'Job result: {res}')"
+
 # --- Lab 3 -------------------------------------------------------------------
 serve: ## Run the inference service locally on :8080
 	python scripts/export_model.py --out reports/model.joblib
