@@ -28,9 +28,9 @@ from src.train import git_commit
 # TODO(Lab 2): widen this. Three hyperparameters minimum, and vary something that
 # actually changes model behaviour rather than three variants of the same idea.
 SEARCH_SPACE: dict[str, list] = {
-    "n_estimators": [100, 300],
-    "max_depth": [4, 8, 12],
-    "min_samples_leaf": [1, 5],
+    "n_estimators": [50, 100, 300],
+    "max_depth": [4, 8, 14],
+    "min_samples_leaf": [1, 3, 5],
 }
 
 
@@ -43,11 +43,14 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="ITCS355 Lab 2 — budgeted study")
     p.add_argument("--trials", type=int, default=12, help="minimum 12 for the lab")
     p.add_argument("--budget-thb", type=float, default=150.0)
-    p.add_argument("--instance", default="local", help="key into src/costs.py PRICE_TABLE")
+    # change default="local" to default="Standard_DS3_v2" for azure (lab2task)
+    p.add_argument("--instance", default="Standard_DS3_v2", help="key into src/costs.py PRICE_TABLE")
     p.add_argument("--seed", type=int, default=seeds.DEFAULT_SEED)
     p.add_argument("--experiment", default="itcs355-lab2")
     p.add_argument("--checkpoint", type=Path, default=Path("reports/tune_checkpoint.json"),
                    help="Resume file. Spot interruption should cost minutes, not the run.")
+    #Add the --spot argument to saving the cost, it ensures that when the lab is run on Azure, it will use discounted spot pricing (30%% of on-demand) (lab2task)
+    p.add_argument("--spot", action="store_true", default=True, help="Use discounted spot pricing (30%% of on-demand)")
     return p.parse_args()
 
 
@@ -76,7 +79,8 @@ def main() -> None:
 
     state = load_checkpoint(args.checkpoint)
     candidates = grid(SEARCH_SPACE)[: args.trials]
-    rate = costs.hourly_rate(cfg.provider, args.instance)
+    # Pass spot flag to hourly_rate to use discounted spot pricing (lab2task)
+    rate = costs.hourly_rate(cfg.provider, args.instance, spot=args.spot)
 
     skipped: list[dict] = []
     for i, params in enumerate(candidates):
@@ -104,7 +108,8 @@ def main() -> None:
             trial_cost = elapsed_h * rate
             state["spent_thb"] += trial_cost
 
-            mlflow.log_params({**params, "seed": seed, "instance": args.instance})
+            #Add the spot flag to mlflow.log_params to track whether the trial used spot pricing (lab2task)
+            mlflow.log_params({**params, "seed": seed, "instance": args.instance, "spot": args.spot})
             mlflow.log_metrics({
                 **metrics,
                 "duration_s": round(elapsed_h * 3600, 3),

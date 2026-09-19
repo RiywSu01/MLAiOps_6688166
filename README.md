@@ -122,3 +122,12 @@ Personally, i would drop controlled seeds first. because the seeds effect or bre
 
 That last check is not optional. A credential in Git history is an automatic deduction in this
 course, and rotating it is your responsibility, not the grader's.
+
+---
+
+# ITCS355 Lab 2 - Experiment Tracking and Model Registry
+
+## Question
+**From Question:** Who in a real organisation, not in this course should be allowed to perform that promotion, and what evidence they should require.
+
+**Ans:** In my Opinion, an MLOps Enginner should be allowed to perform that promotion because if let the data scientist who trained the model naturally, they may overlook or mistaked to look or check at the operational costs, latency bloat, or data leakage. The eidence they should require is such as git commit, data version, seed, Ml flow run, image digest, training job, cost.

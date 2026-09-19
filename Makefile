@@ -7,6 +7,10 @@ TAG   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 PLATFORM ?= linux/amd64
 SEED ?= 20260101
 
+# For Lab2 at "make reload-check"
+MODEL_REGISTRY_NAME ?= itcs355-6688166
+VERSION ?= 2
+
 .PHONY: help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
         tune compare reload-check serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate
 
@@ -60,7 +64,8 @@ clean: ## Remove local artifacts
 
 # --- Lab 2 -------------------------------------------------------------------
 tune: ## Budgeted hyperparameter study (>=12 trials)
-	python -m src.tune --trials 12 --budget-thb 150
+# Adding --instance Standard_DS3_v2 for azure (lab2task)
+	python -m src.tune --trials 12 --budget-thb 150 --instance Standard_DS3_v2
 
 compare: ## Rank runs by metric and by cost per point
 	python scripts/compare_runs.py --experiment itcs355-lab2

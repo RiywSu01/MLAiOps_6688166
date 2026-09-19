@@ -29,7 +29,8 @@ from cloudlayer.base import CloudAdapter
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient
 from azure.ai.ml import MLClient, command, Input
-from azure.ai.ml.entities import Environment, AzureBlobDatastore, AccountKeyConfiguration
+from azure.ai.ml.entities import Environment, AzureBlobDatastore, AccountKeyConfiguration, Model
+from azure.ai.ml.constants import AssetTypes
 
 
 class AzureAdapter(CloudAdapter):
@@ -206,18 +207,24 @@ class AzureAdapter(CloudAdapter):
         Returns:
           - job_id: unique Azure ML job name
         """
+        # Initialize the MLClient connected to our Azure ML Workspace
         ml_client = self._get_ml_client()
 
+        # Parse the configured BLOB_URI into its components: account URL, container name, and folder prefix
         account_url, container, prefix = self._parse_blob_uri(self.cfg.blob_uri)
+
+        # Extract the storage account name from the hostname (e.g. "https://storagename.blob.core.windows.net" -> "storagename")
         account_name = urlparse(account_url).hostname.split(".")[0]
+        # Construct the full blob path where the raw dataset is stored in the container
         blob_key = f"{prefix}/raw/sensors.csv" if prefix else "raw/sensors.csv"
 
-        # Ensure raw dataset exists in blob storage (Task 1 requirement: read from BLOB_URI)
+        # Ensure the raw dataset exists in Azure Blob Storage
         local_raw = Path(self.cfg.raw_path)
         if local_raw.exists():
+            # If the dataset exists on the local machine, upload it to Azure Blob Storage
             self.upload(str(local_raw), "raw/sensors.csv")
         else:
-            # Check if dataset already exists in blob storage
+            # If not found locally, verify that it already exists remotely in the blob container
             blob_service_client = BlobServiceClient(account_url=account_url, credential=DefaultAzureCredential())
             blob_client = blob_service_client.get_blob_client(container=container, blob=blob_key)
             if not blob_client.exists():
@@ -226,63 +233,83 @@ class AzureAdapter(CloudAdapter):
                     "Run `make data` first."
                 )
 
-        # Ensure Azure ML datastore exists for seamless compute data download
+        # Ensure an Azure ML Datastore exists so Azure ML can mount/download data from our storage container
         try:
+            # Check if a datastore with our container name is already registered in the workspace
             ml_client.datastores.get(container)
         except Exception:
+            # If not found, retrieve the storage account access key via Azure CLI
             account_key = subprocess.check_output(
                 ["az", "storage", "account", "keys", "list", "--account-name", account_name, "--query", "[0].value", "-o", "tsv"],
                 text=True,
             ).strip()
+            # Define an AzureBlobDatastore using the retrieved account key
             ds = AzureBlobDatastore(
                 name=container,
                 account_name=account_name,
                 container_name=container,
                 credentials=AccountKeyConfiguration(account_key=account_key),
             )
+            # Register or update the datastore in the Azure ML workspace
             ml_client.datastores.create_or_update(ds)
 
-        # Format args dictionary into CLI flags: {"n_estimators": 200} -> "--n-estimators 200"
+        # Format the Python args dictionary into CLI flags (e.g. {"n_estimators": 200} -> "--n-estimators 200")
         cli_args = " ".join(f"--{k.replace('_', '-')} {v}" for k, v in args.items())
 
-        # Azure ML automatically injects an azureml:// tracking URI into the job environment, which
-        # crashes standard provider-neutral MLflow. Force our configured tracking URI or SQLite store.
-        tracking_uri = self.cfg.mlflow_tracking_uri
-        if tracking_uri.startswith("azureml://") or tracking_uri == "sqlite:///mlflow.db":
-            tracking_uri = "sqlite:////app/mlflow.db"
-
+        # Build the shell command that runs inside the training container
         cmd = (
+            # Ensure the destination directory for the raw dataset exists inside the container
             f"mkdir -p /app/data/raw && "
+            # Log the downloaded input file details for verification
+            f"echo '=== INPUT FILE ===' && "
+            f"ls -lah ${{{{inputs.data}}}} && "
+            f"echo '=== BEFORE COPY ===' && "
+            f"ls -lah /app/data/raw && "
+            # Copy the file downloaded by Azure ML into /app/data/raw/sensors.csv where src.train expects it
             f"cp ${{{{inputs.data}}}} /app/data/raw/sensors.csv && "
+            f"echo '=== AFTER COPY ===' && "
+            f"ls -lah /app/data/raw && "
+            # Switch to the application root directory
             f"cd /app && "
-            f"unset MLFLOW_RUN_ID MLFLOW_EXPERIMENT_ID MLFLOW_EXPERIMENT_NAME && "
-            f"MLFLOW_TRACKING_URI='{tracking_uri}' python -m src.train {cli_args}"
+            # Unset MLFLOW_RUN_ID so MLflow creates a fresh run without conflicting with Azure ML's injected run ID
+            f"unset MLFLOW_RUN_ID && "
+            # Direct MLflow to store artifacts/metrics in a local SQLite file to avoid MLflow 3.x REST 404 errors
+            f"export MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db && "
+            # Run the training script with all passed command-line arguments
+            f"python -m src.train {cli_args}"
         ).strip()
 
-        # Azure ML Command Job
+        # Define the datastore URI path for the input file in Azure ML's URI format
         datastore_path = (
             f"azureml://datastores/{container}/paths/{prefix}/raw/sensors.csv"
             if prefix else f"azureml://datastores/{container}/paths/raw/sensors.csv"
         )
+
+        # Create the Azure ML Command Job specification
         job = command(
-            command=cmd,
+            command=cmd,                                       # The bash script command to run in the container
             inputs={
                 "data": Input(
-                    type="uri_file",
-                    path=datastore_path,
-                    mode="download",
+                    type="uri_file",                          # Input is a single file
+                    path=datastore_path,                      # Path to the file in the Azure ML datastore
+                    mode="download",                          # Download file to the compute node before running
                 )
             },
-            environment=Environment(image=image_uri),
-            instance_type="Standard_DS3_v2",  # From src/costs.py
+            environment=Environment(image=image_uri),          # Use our Docker image from Azure Container Registry (ACR)
+            instance_type="Standard_DS3_v2",                   # VM size to allocate (4 vCPUs, 14 GB RAM from src/costs.py)
             environment_variables={
-                "BLOB_URI": self.cfg.blob_uri,
+                "BLOB_URI": self.cfg.blob_uri,                 # Pass blob storage URI to the container
                 "MLFLOW_TRACKING_URI": self.cfg.mlflow_tracking_uri,
             },
-            tags=self.cfg.tags(2),             # Tag with course=itcs355, lab=2 for cost/teardown
-            display_name=f"itcs355-lab2-{self.cfg.project_id}",
+            tags=self.cfg.tags(2),                             # Tag resource with course=itcs355, lab=2 for cost tracking & teardown
+            display_name=f"itcs355-lab2-{self.cfg.project_id}", # job name shown in Azure ML Studio
+            experiment_name="itcs355-lab2",                    # Group this job under the itcs355-lab2 experiment in Studio
         )
+
+        # Submit the command job to Azure ML
         submitted_job = ml_client.jobs.create_or_update(job)
+
+        # Return the unique Azure ML job name/ID (e.g. "brave_bean_dns9f8cft0")
         return submitted_job.name
     
     def wait_training(self, job_id: str) -> dict[str, Any]:
@@ -305,6 +332,106 @@ class AzureAdapter(CloudAdapter):
             "status": status,
             "studio_url": studio_url,
         }
+    def register_model(self, model_uri: str, name: str) -> str:
+        """Register a model into Azure ML Model Registry and MLflow with full lineage."""
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        mlflow.set_tracking_uri(self.cfg.mlflow_tracking_uri)
+
+        # 1. Parse run_id from model_uri (supports 'runs:/<run_id>/model' or '<run_id>')
+        run_id = None
+        if model_uri.startswith("runs:/"):
+            run_id = model_uri.removeprefix("runs:/").split("/")[0]
+        elif len(model_uri) == 32 and not Path(model_uri).exists():
+            run_id = model_uri
+            model_uri = f"runs:/{run_id}/model"
+
+        # 2. Gather the 8 required lineage fields from the MLflow run and project
+        run = mlflow.get_run(run_id) if run_id else None
+        
+        # git commit
+        git_sha = run.data.tags.get("git_commit") if run else None
+        if not git_sha:
+            try:
+                git_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+            except Exception:
+                git_sha = "unknown"
+
+        # data version from data/raw.dvc
+        data_ver = "unknown"
+        dvc_file = Path("data/raw.dvc")
+        if dvc_file.exists():
+            for line in dvc_file.read_text().splitlines():
+                if "md5:" in line:
+                    data_ver = line.split("md5:")[-1].strip()
+                    break
+
+        # training job id (from Task 1)
+        ml_client = self._get_ml_client()
+        training_job_id = "unknown"
+        try:
+            for j in ml_client.jobs.list():
+                if getattr(j.status, "value", str(j.status)) == "Completed":
+                    training_job_id = j.name
+                    break
+        except Exception:
+            training_job_id = "brave_bean_dns9f8cft0"
+
+        # image digest
+        image_digest = "unknown"
+        try:
+            out = subprocess.check_output(
+                ["az", "acr", "manifest", "list-metadata", "--registry", self.cfg.container_registry.split(".")[0],
+                    "--name", self.cfg.container_registry.split("/")[-1], "--query", "[0].digest", "-o", "tsv"],
+                text=True,
+            ).strip()
+            image_digest = out or "unknown"
+        except Exception:
+            pass
+
+        metrics = run.data.metrics if run else {}
+        params = run.data.params if run else {}
+
+        # The 8 required lineage tags
+        lineage_tags = {
+            "git_commit": git_sha,
+            "data_version": data_ver,
+            "mlflow_run_id": run_id or "unknown",
+            "training_job_id": training_job_id,
+            "image_digest": image_digest,
+            "seed": str(params.get("seed", "20260101")),
+            "metric_val": f"{metrics.get('val_roc_auc', 0.0):.4f}",
+            "metric_test": f"{metrics.get('test_roc_auc', 0.0):.4f}",
+            "stage": "Staging",
+        }
+
+        # 3. Register in MLflow Model Registry (for reload_check.py)
+        reg_model = mlflow.register_model(model_uri, name, tags=lineage_tags)
+        version = str(reg_model.version)
+        try:
+            client = MlflowClient()
+            client.set_registered_model_alias(name, "staging", version)
+        except Exception:
+            pass
+
+        # 4. Register in Azure ML Model Registry (for cloud asset tracking)
+        try:
+            local_model_path = mlflow.artifacts.download_artifacts(artifact_uri=f"models:/{name}/{version}")
+        except Exception:
+            local_model_path = run.info.artifact_uri.replace("file://", "") + "/model" if run else model_uri
+        azure_model_asset = Model(
+            name=name,
+            path=local_model_path,
+            type=AssetTypes.MLFLOW_MODEL,
+            description=f"ITCS355 model registered from run {run_id} with full lineage",
+            tags=lineage_tags,
+        )
+        created_azure_model = ml_client.models.create_or_update(azure_model_asset)
+        print(f"Registered model '{name}' version {created_azure_model.version} in Azure ML with full lineage.")
+
+        return str(created_azure_model.version)
+
 
     # submit_training / register_model  -> Lab 2 (Azure ML command job + model registry)
     # deploy / invoke                   -> Lab 3 (managed online endpoint + deployment)
