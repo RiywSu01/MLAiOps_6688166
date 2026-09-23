@@ -130,4 +130,4 @@ course, and rotating it is your responsibility, not the grader's.
 ## Question
 **From Question:** Who in a real organisation, not in this course should be allowed to perform that promotion, and what evidence they should require.
 
-**Ans:** In my Opinion, an MLOps Enginner should be allowed to perform that promotion because if let the data scientist who trained the model naturally, they may overlook or mistaked to look or check at the operational costs, latency bloat, or data leakage. The eidence they should require is such as git commit, data version, seed, Ml flow run, image digest, training job, cost.
+**Ans:** In my Opinion, an MLOps Enginner should be allowed to perform that promotion because if let the data scientist who trained the model naturally, they may overlook or forgot to look or check at the operational costs, latency bloat, or data leakage. The evidence they should require the eight linenage fields such as git commit, data version, seed, Ml flow run, image digest, training job, cost.

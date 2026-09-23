@@ -96,6 +96,25 @@ loadtest: ## Load test at three concurrency levels
 	  k6 run -e TARGET=$(TARGET) -e VUS=$$vus loadtest/k6.js || true; \
 	done
 
+deploy: ## Deploy the inference service to Azure Container Apps
+	python -c "from src import config; from cloudlayer.factory import get_adapter; \
+	adapter = get_adapter(config.load()); \
+	url = adapter.deploy('$(VERSION)', 'itcs355-predict', 'Standard_B1s'); \
+	print(f'Endpoint live at: {url}')"
+
+smoke: ## Smoke test the live endpoint with three known payloads
+	python -c "from src import config; from cloudlayer.factory import get_adapter; \
+	adapter = get_adapter(config.load()); \
+	samples = [ \
+	  {'temp_c': 78.4, 'vibration_mm_s': 3.1, 'pressure_kpa': 315.2, 'hours_since_service': 4200.0, 'load_pct': 68.0, 'ambient_humidity': 55.0}, \
+	  {'temp_c': 95.0, 'vibration_mm_s': 7.5, 'pressure_kpa': 450.0, 'hours_since_service': 8500.0, 'load_pct': 92.0, 'ambient_humidity': 40.0}, \
+	  {'temp_c': 65.0, 'vibration_mm_s': 1.2, 'pressure_kpa': 290.0, 'hours_since_service': 500.0, 'load_pct': 30.0, 'ambient_humidity': 60.0}, \
+	]; \
+	for i, s in enumerate(samples, 1): \
+	  res = adapter.invoke('itcs355-predict', s); \
+	  p = res['probability']; v = res['model_version']; \
+	  print(f'Payload {i}: prob={p:.4f}, version={v}')"
+
 # --- Lab 4 -------------------------------------------------------------------
 inject-drift: ## Shift a feature's distribution on purpose
 	python scripts/inject_drift.py --feature temp_c --mode shift --magnitude 6

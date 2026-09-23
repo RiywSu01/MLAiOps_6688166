@@ -1,9 +1,11 @@
 .git
 .dvc/cache
 data/
-mlruns/
+#LAB03
+# mlruns/
 mlartifacts/
-mlflow.db
+#LAB03
+# mlflow.db
 reports/
 notebooks/
 __pycache__/

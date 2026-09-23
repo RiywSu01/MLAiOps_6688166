@@ -332,6 +332,7 @@ class AzureAdapter(CloudAdapter):
             "status": status,
             "studio_url": studio_url,
         }
+
     def register_model(self, model_uri: str, name: str) -> str:
         """Register a model into Azure ML Model Registry and MLflow with full lineage."""
         import mlflow
@@ -431,6 +432,102 @@ class AzureAdapter(CloudAdapter):
         print(f"Registered model '{name}' version {created_azure_model.version} in Azure ML with full lineage.")
 
         return str(created_azure_model.version)
+
+    def deploy(self, model_ref: str, endpoint: str, instance: str) -> str:
+        git_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+        acr_host = self.cfg.container_registry.split("/")[0]
+        image_uri = f"{acr_host}/itcs355-serve:{git_sha}"
+
+        # Parse version if in format 'name:version' or just 'version'
+        version = model_ref.split(":")[-1] if ":" in model_ref else model_ref
+
+        # Check if container app already exists
+        exists = subprocess.run(
+            ["az", "containerapp", "show", "--name", endpoint, "--resource-group", self.cfg.project_id],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0
+        if exists:
+            cmd = [
+                "az", "containerapp", "update",
+                "--name", endpoint,
+                "--resource-group", self.cfg.project_id,
+                "--image", image_uri,
+                "--set-env-vars",
+                f"MODEL_REGISTRY_NAME={self.cfg.model_registry_name}",
+                f"MODEL_VERSION={version}",
+                "MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db",
+            ]
+        else:
+            acr_name = acr_host.split(".")[0]
+            acr_password = subprocess.check_output(
+                ["az", "acr", "credential", "show", "--name", acr_name, "--query", "passwords[0].value", "-o", "tsv"],
+                text=True,
+            ).strip()
+            cmd = [
+                "az", "containerapp", "create",
+                "--name", endpoint,
+                "--resource-group", self.cfg.project_id,
+                "--environment", "itcs355-env",
+                "--image", image_uri,
+                "--target-port", "8080",
+                "--ingress", "external",
+                "--registry-server", acr_host,
+                "--registry-username", acr_name,
+                "--registry-password", acr_password,
+                "--env-vars",
+                f"MODEL_REGISTRY_NAME={self.cfg.model_registry_name}",
+                f"MODEL_VERSION={version}",
+                "MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db",
+                "--cpu", "0.5",
+                "--memory", "1.0Gi",
+                "--min-replicas", "1",
+                "--max-replicas", "3",
+            ]
+        print(f"Deploying {image_uri} (model version {version}) to Azure Container Apps '{endpoint}'...")
+        subprocess.run(cmd, check=True)
+        fqdn = subprocess.check_output(
+            [
+                "az", "containerapp", "show",
+                "--name", endpoint,
+                "--resource-group", self.cfg.project_id,
+                "--query", "properties.configuration.ingress.fqdn",
+                "-o", "tsv",
+            ],
+            text=True,
+        ).strip()
+        url = f"https://{fqdn}"
+        print(f"Endpoint live at: {url}")
+        return url
+
+
+    def invoke(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        import json
+        import urllib.request
+
+        if not endpoint.startswith("http"):
+            fqdn = subprocess.check_output(
+                [
+                    "az", "containerapp", "show",
+                    "--name", endpoint,
+                    "--resource-group", self.cfg.project_id,
+                    "--query", "properties.configuration.ingress.fqdn",
+                    "-o", "tsv",
+                ],
+                text=True,
+            ).strip()
+            url = f"https://{fqdn}/predict"
+        else:
+            url = endpoint if endpoint.endswith("/predict") else f"{endpoint.rstrip('/')}/predict"
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
 
     # submit_training / register_model  -> Lab 2 (Azure ML command job + model registry)
