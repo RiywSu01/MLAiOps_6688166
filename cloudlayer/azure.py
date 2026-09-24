@@ -434,19 +434,38 @@ class AzureAdapter(CloudAdapter):
         return str(created_azure_model.version)
 
     def deploy(self, model_ref: str, endpoint: str, instance: str) -> str:
-        git_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
-        acr_host = self.cfg.container_registry.split("/")[0]
-        image_uri = f"{acr_host}/itcs355-serve:{git_sha}"
-
-        # Parse version if in format 'name:version' or just 'version'
         version = model_ref.split(":")[-1] if ":" in model_ref else model_ref
+        acr_host = self.cfg.container_registry.split("/")[0]
+        acr_name = acr_host.split(".")[0]
 
-        # Check if container app already exists
+        # 1. Fetch image digest from ACR (pin by digest, not moving tags)
+        git_sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+        remote_tag = f"{acr_host}/itcs355-serve:{git_sha}"
+        
+        # Ensure image is pushed or obtain digest
+        digest = subprocess.check_output(
+            ["az", "acr", "manifest", "show-metadata", "--registry", acr_name, 
+             "--name", f"itcs355-serve:{git_sha}", "--query", "digest", "-o", "tsv"],
+            text=True,
+        ).strip()
+        image_uri = f"{acr_host}/itcs355-serve@{digest}"
+
+        # 2. Get ACR credentials
+        acr_password = subprocess.check_output(
+            ["az", "acr", "credential", "show", "--name", acr_name, "--query", "passwords[0].value", "-o", "tsv"],
+            text=True,
+        ).strip()
+
+        # 3. tags (course=itcs355 student=<id> lab=3)
+        tags = [f"{k}={v}" for k, v in self.cfg.tags(3).items()]
+
+        # 4. Check if container app already exists
         exists = subprocess.run(
             ["az", "containerapp", "show", "--name", endpoint, "--resource-group", self.cfg.project_id],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         ).returncode == 0
+
         if exists:
             cmd = [
                 "az", "containerapp", "update",
@@ -457,13 +476,9 @@ class AzureAdapter(CloudAdapter):
                 f"MODEL_REGISTRY_NAME={self.cfg.model_registry_name}",
                 f"MODEL_VERSION={version}",
                 "MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db",
+                "--tags", *tags,
             ]
         else:
-            acr_name = acr_host.split(".")[0]
-            acr_password = subprocess.check_output(
-                ["az", "acr", "credential", "show", "--name", acr_name, "--query", "passwords[0].value", "-o", "tsv"],
-                text=True,
-            ).strip()
             cmd = [
                 "az", "containerapp", "create",
                 "--name", endpoint,
@@ -483,9 +498,12 @@ class AzureAdapter(CloudAdapter):
                 "--memory", "1.0Gi",
                 "--min-replicas", "1",
                 "--max-replicas", "3",
+                "--tags", *tags,
             ]
+
         print(f"Deploying {image_uri} (model version {version}) to Azure Container Apps '{endpoint}'...")
         subprocess.run(cmd, check=True)
+
         fqdn = subprocess.check_output(
             [
                 "az", "containerapp", "show",
@@ -497,9 +515,7 @@ class AzureAdapter(CloudAdapter):
             text=True,
         ).strip()
         url = f"https://{fqdn}"
-        print(f"Endpoint live at: {url}")
         return url
-
 
     def invoke(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         import json
