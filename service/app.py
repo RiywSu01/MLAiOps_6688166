@@ -40,6 +40,9 @@ def _load_model():
     if name and version:
         import mlflow.sklearn  # imported lazily so tests can run without a registry
 
+        #added on LAB03 task4, Skops Deserialization Security, the container won't reject tree deserialization on startup.
+        os.environ["MLFLOW_SKLEARN_LOAD_MODEL_TRUST_ALL"] = "1"
+
         mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db"))
         return mlflow.sklearn.load_model(f"models:/{name}/{version}")
 
