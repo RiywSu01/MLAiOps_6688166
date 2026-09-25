@@ -545,6 +545,39 @@ class AzureAdapter(CloudAdapter):
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
+    def teardown(self, tags: dict[str, str]) -> list[str]:
+        #Delete every resource carrying these tags. Returns what was deleted.
+
+        deleted: list[str] = []
+        rg = self.cfg.project_id
+
+        # 1. Check and delete Azure Container App endpoint (Lab 3 serving endpoint)
+        endpoint_name = "itcs355-predict"
+        try:
+            check_app = subprocess.run(
+                ["az", "containerapp", "show", "--name", endpoint_name, "--resource-group", rg],
+                capture_output=True,
+                text=True,
+            )
+            if check_app.returncode == 0:
+                print(f"Deleting Azure Container App {endpoint_name} in resource group {rg}...")
+                del_app = subprocess.run(
+                    ["az", "containerapp", "delete", "--name", endpoint_name, "--resource-group", rg, "--yes"],
+                    capture_output=True,
+                    text=True,
+                )
+                if del_app.returncode == 0:
+                    deleted.append(endpoint_name)
+                    print(f"Successfully deleted {endpoint_name}.")
+                else:
+                    print(f"Warning: Failed to delete {endpoint_name}: {del_app.stderr.strip()}")
+            else:
+                print(f"No active Container App named {endpoint_name} found in resource group {rg}.")
+        except Exception as exc:
+            print(f"Error during Container App teardown: {exc}")
+
+        return deleted
+
 
     # submit_training / register_model  -> Lab 2 (Azure ML command job + model registry)
     # deploy / invoke                   -> Lab 3 (managed online endpoint + deployment)
