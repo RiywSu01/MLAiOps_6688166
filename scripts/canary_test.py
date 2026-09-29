@@ -11,7 +11,6 @@ This script executes the required workflow:
 from __future__ import annotations
 
 import datetime
-import json
 import subprocess
 import sys
 import time
@@ -55,7 +54,7 @@ def main():
     print("=================================================================")
     print(f"Target Endpoint:  {TARGET}")
     print(f"Active Split:     90% {STABLE_REVISION} (v2) / 10% {CANARY_REVISION} (v3)")
-    print(f"Evaluation Mode:  Streaming evaluation from METRICS ALONE")
+    print("Evaluation Mode:  Streaming evaluation from METRICS ALONE")
     print("-----------------------------------------------------------------\n")
 
     # Warmup ping to ensure containers are warm
