@@ -76,8 +76,11 @@ jobs:
         run: docker buildx build --platform linux/amd64 -t itcs355:${{ github.sha }} --load .
 
       - name: Build serving image
-        run: docker buildx build --platform linux/amd64 -f service/Dockerfile.serve -t itcs355-serve:${{ github.sha }} --load .
-
+        run: |
+          touch mlflow.db
+          mkdir -p mlruns
+          docker buildx build --platform linux/amd64 -f service/Dockerfile.serve -t itcs355-serve:${{ github.sha }} --load .
+      
       - name: Integration test
         run: |
           python scripts/make_dataset.py
