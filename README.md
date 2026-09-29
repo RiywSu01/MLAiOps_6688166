@@ -131,3 +131,16 @@ course, and rotating it is your responsibility, not the grader's.
 **From Question:** Who in a real organisation, not in this course should be allowed to perform that promotion, and what evidence they should require.
 
 **Ans:** In my Opinion, an MLOps Enginner should be allowed to perform that promotion because if let the data scientist who trained the model naturally, they may overlook or forgot to look or check at the operational costs, latency bloat, or data leakage. The evidence they should require the eight linenage fields such as git commit, data version, seed, Ml flow run, image digest, training job, cost.
+
+---
+
+# ITCS355 Lab 4 - CI/CD, Observability, and Drift
+
+## Data contract test (at least two)
+> **1.** Column names and types: An upstream database was renamed 'reading_id' column to 'id' column,  The test will fail if the column names and types are not matched with the schema. <br>
+> **2.** A numeric feature within plausible ranges: Like someone replaces an old temperature sensor with a new one that has a different range of temperature like Fahrenheit instead of Celsius, The type is still a float, the code wont crash, but the model will produce garbage predictions silently.
+
+
+
+
+
