@@ -136,11 +136,30 @@ course, and rotating it is your responsibility, not the grader's.
 
 # ITCS355 Lab 4 - CI/CD, Observability, and Drift
 
-## Data contract test (at least two)
+## Data contract test (at least two) (TASK01)
 > **1.** Column names and types: An upstream database was renamed 'reading_id' column to 'id' column,  The test will fail if the column names and types are not matched with the schema. <br>
 > **2.** A numeric feature within plausible ranges: Like someone replaces an old temperature sensor with a new one that has a different range of temperature like Fahrenheit instead of Celsius, The type is still a float, the code wont crash, but the model will produce garbage predictions silently.
 
+## Drift Detection & Threshold Justification (TASK05)
+> - **Threshold**: PSI >= 0.25
+> - **Justification**: A threshold of 0.10 is too sensitive and would trigger frequent false alarms due to minor operational fluctuations (e.g., daily temperature/humidity cycles). A threshold of 0.25 represents a significant distributional shift where feature distributions deviate enough to impair model accuracy and warrant investigation without causing alert fatigue.
 
+## Injected Drift Post-Mortem (TASK06)
+
+**What fired:**
+Drift detector alert on feature `temp_c`: PSI = 0.38333 (threshold: 0.25), KS = 0.24567, mean shifted from 79.58°C to 85.58°C. Detection latency was instantaneous (< 1 second between injection and detection).
+
+**True cause:**
+Data drift caused by an upstream sensor calibration offset (+6.0°C mean shift injected into `temp_c` via `scripts/inject_drift.py`).
+
+**Retrain, roll back, or no action — and why:**
+No action on the model. Retraining on corrupted/shifted sensor data would destroy the existing good model by teaching it false temperature baselines. The correct fix is to recalibrate or repair the upstream temperature sensor, then backfill. 
+
+**What this would have cost if unnoticed for a week:**
+An artificial with temp_c = +6°C elevation across 240 machines would severely inflate predicted failure probabilities, triggering dozens of false-alarm emergency maintenance dispatches, unnecessary machine downtime, and thousands of baht in wasted inspection costs.
+
+**How to prevent or detect it faster:**
+Run the drift detection script on a scheduled cron job (e.g. daily or hourly) comparing rolling production telemetry windows against the training reference baseline, alerting via automated email/webhook.
 
 
 
