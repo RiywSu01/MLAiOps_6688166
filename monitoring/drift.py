@@ -36,6 +36,26 @@ class FeatureDrift:
     cur_mean: float
     verdict: str
 
+# Helper function for sending to email for LAB04 task05
+def send_email_alert(sender: str, password: str, recipient: str, subject: str, body: str) -> None:
+    import smtplib
+    from email.mime.text import MIMEText
+    import os
+
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = recipient
+
+    try:
+        with smtplib.SMTP_SSL(smtp_host, 465) as server:
+            server.login(sender, password)
+            server.sendmail(sender, [recipient], msg.as_string())
+        print(f"Drift alert email sent successfully to {recipient}")
+    except Exception as e:
+        print(f"Failed to send email alert: {e}")
+
 
 def psi(reference: np.ndarray, current: np.ndarray, bins: int = 10) -> float:
     """Population Stability Index.
@@ -102,6 +122,9 @@ def compare(reference: pd.DataFrame, current: pd.DataFrame, features: list[str])
 def main() -> int:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from src import config, data
+    
+    #Load config from cloud.env for LAB04 task05
+    config.load(strict=False)
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--reference", type=Path, default=Path("data/raw/sensors.csv"))
@@ -138,6 +161,20 @@ def main() -> int:
         print("Before you retrain: is this drift, or is it a broken upstream pipeline? "
               "Retraining on corrupted data destroys a working model faster than any "
               "schedule would.")
+        # Send email alert from configured in cloud.env
+        import os
+        from datetime import datetime
+        sender = os.environ.get("ALERT_EMAIL_SENDER")
+        pwd = os.environ.get("ALERT_EMAIL_PASSWORD")
+        rcpt = os.environ.get("ALERT_EMAIL_RECIPIENT", sender)
+        if sender and pwd and rcpt:
+            subject = f"🚨 MLOps Alert: Data Drift Detected in Production ({len(breached)} features)"
+            body = f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n" \
+                   f"Threshold: PSI >= {args.threshold}\n\n" \
+                   f"Breached features:\n" + \
+                   "\n".join(f" - {r.feature}: PSI={r.psi:.5f}, KS={r.ks_statistic:.5f} (cur_mean={r.cur_mean:.2f} vs ref_mean={r.ref_mean:.2f})" for r in breached) + \
+                   "\n\nAction required: Check upstream telemetry pipelines before triggering retraining."
+            send_email_alert(sender, pwd, rcpt, subject, body)
         return 2
     print(f"\nOK  no feature above threshold {args.threshold}")
     return 0

@@ -23,14 +23,7 @@ jobs:
     environment: staging
     steps:
       - uses: actions/checkout@v4
-
-      # --- AWS ---------------------------------------------------------------
-      # - uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-      #     aws-region: ${{ vars.REGION }}
-      # - run: aws ecr get-login-password --region ${{ vars.REGION }} | docker login --username AWS --password-stdin ${{ vars.CONTAINER_REGISTRY }}
-
+      
       #--- Azure -------------------------------------------------------------
       - uses: azure/login@v2
         with:
@@ -38,13 +31,6 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       - run: az acr login --name ${{ vars.ACR_NAME }}
-
-      # --- GCP ---------------------------------------------------------------
-      # - uses: google-github-actions/auth@v2
-      #   with:
-      #     workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-      #     service_account: ${{ secrets.GCP_DEPLOY_SA }}
-      # - run: gcloud auth configure-docker ${{ vars.REGION }}-docker.pkg.dev
 
       - name: Push image
         run: |
